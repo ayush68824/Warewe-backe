@@ -32,7 +32,11 @@ app.post('/api/verify', async (req, res) => {
   try {
     const { email } = req.body;
 
+    // Log request for debugging
+    console.log('Verification request:', { email: email || 'missing' });
+
     if (!email) {
+      console.log('Error: Email is missing');
       return res.status(400).json({
         success: false,
         error: 'Email is required',
@@ -41,6 +45,7 @@ app.post('/api/verify', async (req, res) => {
     }
 
     if (typeof email !== 'string') {
+      console.log('Error: Email is not a string');
       return res.status(400).json({
         success: false,
         error: 'Invalid email format',
@@ -49,16 +54,15 @@ app.post('/api/verify', async (req, res) => {
     }
 
     const result = await verifyEmail(email);
+    console.log('Verification result:', { 
+      email: result.email, 
+      result: result.result, 
+      resultcode: result.resultcode 
+    });
     
-    // Determine HTTP status code based on result
-    let statusCode = 200;
-    if (result.result === 'invalid' && result.resultcode === 6) {
-      statusCode = 400;
-    } else if (result.result === 'unknown') {
-      statusCode = 202; // Accepted but uncertain
-    }
-
-    res.status(statusCode).json({
+    // Return 200 for all verification results (success, invalid, unknown)
+    // 400 is only for request errors, not verification results
+    res.status(200).json({
       success: result.result === 'valid',
       data: result
     });
