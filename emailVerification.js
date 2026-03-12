@@ -140,17 +140,39 @@ function getDidYouMean(email) {
 async function lookupMX(domain) {
   try {
     const mxRecords = await dns.resolveMx(domain);
-    if (!mxRecords || mxRecords.length === 0) {
-      return { success: false, error: 'No MX records found' };
+    
+    // Explicitly check for empty or invalid results
+    if (!mxRecords || !Array.isArray(mxRecords) || mxRecords.length === 0) {
+      return { 
+        success: false, 
+        error: 'No MX records found for domain',
+        mxHosts: [],
+        mxRecords: []
+      };
     }
     
     // Sort by priority
     mxRecords.sort((a, b) => a.priority - b.priority);
-    const mxHosts = mxRecords.map(record => record.exchange);
+    const mxHosts = mxRecords.map(record => record.exchange).filter(host => host && host.length > 0);
+    
+    // Double check we have valid hosts
+    if (!mxHosts || mxHosts.length === 0) {
+      return { 
+        success: false, 
+        error: 'No valid MX hostnames found',
+        mxHosts: [],
+        mxRecords: []
+      };
+    }
     
     return { success: true, mxHosts, mxRecords };
   } catch (error) {
-    return { success: false, error: error.message };
+    return { 
+      success: false, 
+      error: error.message || 'DNS lookup failed',
+      mxHosts: [],
+      mxRecords: []
+    };
   }
 }
 
@@ -335,11 +357,14 @@ async function verifyEmail(email) {
 
     // Step 2: DNS MX lookup
     const mxLookup = await lookupMX(syntaxCheck.domain);
-    if (!mxLookup.success) {
-      result.error = mxLookup.error;
+    
+    // Check if lookup failed OR returned empty results
+    if (!mxLookup.success || !mxLookup.mxHosts || mxLookup.mxHosts.length === 0) {
+      result.error = mxLookup.error || 'No MX records found for domain';
       result.subresult = 'no_mx_records';
       result.resultcode = 6;
       result.result = 'invalid';
+      result.mxRecords = []; // Explicitly set empty array
       // If we have a typo suggestion and no MX records, mark as typo_detected
       if (suggestion) {
         result.subresult = 'typo_detected';
@@ -348,17 +373,8 @@ async function verifyEmail(email) {
       return result;
     }
 
+    // Only proceed if we have valid MX records
     result.mxRecords = mxLookup.mxHosts;
-
-    // Ensure we have MX records before attempting SMTP
-    if (!mxLookup.mxHosts || mxLookup.mxHosts.length === 0) {
-      result.error = 'No MX records available';
-      result.subresult = 'no_mx_records';
-      result.resultcode = 6;
-      result.result = 'invalid';
-      result.executiontime = ((Date.now() - startTime) / 1000).toFixed(2);
-      return result;
-    }
 
     // Step 3: SMTP connection and mailbox check
     let smtpResult = null;
@@ -399,6 +415,7 @@ async function verifyEmail(email) {
     }
 
     // If we get here, all MX records failed but not with "does not exist"
+    // This should only happen if we had MX records but couldn't connect
     if (lastError) {
       if (lastError.subresult === 'greylisted' || lastError.subresult === 'connection_timeout') {
         result.result = 'unknown';
@@ -409,11 +426,20 @@ async function verifyEmail(email) {
       }
       result.subresult = lastError.subresult;
       result.error = lastError.error;
+      // Ensure MX records are still set (they should be from earlier)
+      if (!result.mxRecords || result.mxRecords.length === 0) {
+        result.mxRecords = mxLookup.mxHosts || [];
+      }
     } else {
+      // This should never happen if we have MX records, but handle it anyway
       result.result = 'unknown';
       result.resultcode = 3;
       result.subresult = 'connection_error';
       result.error = 'Could not connect to any mail server';
+      // Ensure MX records are set
+      if (!result.mxRecords || result.mxRecords.length === 0) {
+        result.mxRecords = mxLookup.mxHosts || [];
+      }
     }
 
   } catch (error) {
