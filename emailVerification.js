@@ -350,6 +350,16 @@ async function verifyEmail(email) {
 
     result.mxRecords = mxLookup.mxHosts;
 
+    // Ensure we have MX records before attempting SMTP
+    if (!mxLookup.mxHosts || mxLookup.mxHosts.length === 0) {
+      result.error = 'No MX records available';
+      result.subresult = 'no_mx_records';
+      result.resultcode = 6;
+      result.result = 'invalid';
+      result.executiontime = ((Date.now() - startTime) / 1000).toFixed(2);
+      return result;
+    }
+
     // Step 3: SMTP connection and mailbox check
     let smtpResult = null;
     let lastError = null;
